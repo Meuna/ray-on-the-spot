@@ -16,10 +16,16 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_rsa.pub"
 }
 
-variable "ray_port" {
+variable "ray_cluster_port" {
+  description = "Port for Ray clustering"
+  type        = number
+  default     = 6369
+}
+
+variable "ray_api_port" {
   description = "Port for Ray API"
   type        = number
-  default     = 4200
+  default     = 8265
 }
 
 variable "server_instance_type" {
@@ -43,7 +49,7 @@ variable "spot_price_ratio" {
 variable "allowed_client_cidr" {
   description = "CIDR blocks allowed for client access"
   type        = list(string)
-  default     = ["0.0.0.0/0"]   # Change your ip
+  default     = ["0.0.0.0/0"] # Change your ip
 }
 
 variable "target_capacity" {

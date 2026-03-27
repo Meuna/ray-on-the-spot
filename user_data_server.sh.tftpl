@@ -1,76 +1,23 @@
 #!/bin/bash
 set -e
 
-# Update system packages
-apt-get update -y
-    
-# Install podman
-apt-get install -y podman
+cd /root
 
-# Configure Prefect agent
-mkdir /root/.prefect
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source /root/.local/bin/env
 
-# Create Prefect configuration
-pubip=$(curl http://checkip.amazonaws.com)
-cat > /root/.prefect/profiles.toml <<EOF
-active = "cloud"
-[profiles.local]
-PREFECT_API_URL = "http://127.0.0.1:${prefect_port}/api"
-PREFECT_SERVER_ANALYTICS_ENABLED = false
-[profiles.cloud]
-PREFECT_API_URL = "http://$pubip:${prefect_port}/api"
-PREFECT_SERVER_ANALYTICS_ENABLED = false
+uv python install 3.12
+uv python pin 3.12
+uv venv
+uv pip install ray[default]
+
+# Configure Ray server
+mkdir /root/.ray
+cat > /root/.ray/config.json <<EOF
+{
+  "usage_stats": false,
+  "resources": {"CPU": 0}
+}
 EOF
 
-# Create a systemd services
-
-cat > /etc/containers/systemd/prefect.network <<EOF
-[Unit]
-Description=Prefect network
-
-[Network]
-EOF
-
-cat > /etc/containers/systemd/postgres.container <<EOF
-[Unit]
-Description=Postgres server
-
-[Container]
-ContainerName=postgres
-Image=docker.io/postgres:13
-Environment=POSTGRES_DB=prefect
-Environment=POSTGRES_USER=prefect
-Environment=POSTGRES_PASSWORD=password
-Volume=pgdata:/var/lib/postgresql/data
-Network=prefect.network
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > /etc/containers/systemd/prefect-server.container <<EOF
-[Unit]
-Description=Prefect server
-After=postgres.service
-Requires=postgres.service
-
-[Container]
-ContainerName=prefect-server
-Image=docker.io/prefecthq/prefect:3-latest
-Environment=PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:password@postgres:5432/prefect
-Volume=/root/.prefect:/root/.prefect
-Exec=prefect server start --host 0.0.0.0
-PublishPort=${prefect_port}:${prefect_port}
-Network=prefect.network
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl start prefect-server
-
-# Wait for Prefect server to be healthy before configuring the main pool
-timeout 60 bash -c "until curl -sf http://127.0.0.1:${prefect_port}/api/health >/dev/null; do sleep 5; done"
-
-podman exec prefect-server prefect -p local work-pool create main -t process
+uv run ray start --head --port=${ray_cluster_port} --dashboard-port=${ray_api_port} --dashboard-host 0.0.0.0 --num-cpus 0

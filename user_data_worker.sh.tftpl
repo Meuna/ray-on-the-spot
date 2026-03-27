@@ -1,40 +1,17 @@
 #!/bin/bash
 set -e
 
-# Update system packages
-apt-get update -y
-    
-# Install podman
-apt-get install -y podman
+cd /root
 
-# Configure Prefect agent
-mkdir /root/.prefect
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source /root/.local/bin/env
 
-# Create Prefect configuration
-cat > /root/.prefect/profiles.toml <<EOF
-active = "cloud"
-[profiles.cloud]
-PREFECT_API_URL = "http://${prefect_api_url}:${prefect_port}/api"
-DO_NOT_TRACK = 1
-EOF
+uv python install 3.12
+uv python pin 3.12
+uv venv
+uv pip install ray[default]
 
-# Create a systemd service for Prefect agent
-cat > /etc/containers/systemd/prefect-worker.container <<EOF
-[Unit]
-Description=Prefect worker
+# Wait for Ray server to be healthy before configuring the main pool
+timeout 60 bash -c "until curl -sf http://${ray_api_url}:${ray_api_port} >/dev/null; do sleep 5; done"
 
-[Container]
-ContainerName=prefect-worker
-Image=docker.io/prefecthq/prefect:3-latest
-Volume=/root/.prefect:/root/.prefect
-Exec=prefect worker start -p main
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Wait for Prefect server to be healthy before starting the worker
-timeout 60 bash -c "until curl -sf http://${prefect_api_url}:${prefect_port}/api/health >/dev/null; do sleep 5; done"
-
-systemctl daemon-reload
-systemctl start prefect-worker
+uv run ray start --address="${ray_api_url}:${ray_cluster_port}"

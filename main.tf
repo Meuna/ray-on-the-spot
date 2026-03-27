@@ -87,8 +87,8 @@ resource "aws_security_group" "ray_cluster" {
   vpc_id = aws_vpc.main.id
 
   ingress {
-    from_port   = var.ray_port
-    to_port     = var.ray_port
+    from_port   = 1025
+    to_port     = 60000
     protocol    = "tcp"
     cidr_blocks = [aws_vpc.main.cidr_block]
   }
@@ -116,19 +116,19 @@ resource "aws_security_group" "in_ssh" {
 }
 
 # Security Group to support Ray API access
-resource "aws_security_group" "in_ray" {
-  name   = "${var.environment}-in-ray-sg"
+resource "aws_security_group" "in_ray_api" {
+  name   = "${var.environment}-in-ray-api-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
-    from_port   = var.ray_port
-    to_port     = var.ray_port
+    from_port   = var.ray_api_port
+    to_port     = var.ray_api_port
     protocol    = "tcp"
     cidr_blocks = var.allowed_client_cidr
   }
 
   tags = {
-    Name = "${var.environment}-in-ray-sg"
+    Name = "${var.environment}-in-ray-api-sg"
   }
 }
 
@@ -145,7 +145,7 @@ resource "aws_network_interface" "ray_server" {
     aws_security_group.out_all.id,
     aws_security_group.in_ssh.id,
     aws_security_group.ray_cluster.id,
-    aws_security_group.in_ray.id,
+    aws_security_group.in_ray_api.id,
   ]
   tags = {
     Name = "${var.environment}-ray-server-eni"
@@ -164,7 +164,8 @@ resource "aws_instance" "ray_server" {
   }
 
   user_data_base64 = base64encode(templatefile("${path.module}/user_data_server.sh.tftpl", {
-    ray_port = var.ray_port
+    ray_cluster_port = var.ray_cluster_port
+    ray_api_port     = var.ray_api_port
   }))
 
   tags = {
@@ -243,8 +244,9 @@ resource "aws_launch_template" "ray_worker" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_worker.sh.tftpl", {
-    ray_api_url = aws_instance.ray_server.public_ip,
-    ray_port    = var.ray_port
+    ray_api_url      = aws_instance.ray_server.private_ip,
+    ray_cluster_port = var.ray_cluster_port
+    ray_api_port     = var.ray_api_port
   }))
 
   tag_specifications {
