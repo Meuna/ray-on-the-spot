@@ -81,20 +81,20 @@ resource "aws_security_group" "out_all" {
   }
 }
 
-# Security Group to support Prefect clustering
-resource "aws_security_group" "prefect_cluster" {
-  name   = "${var.environment}-prefect-cluster-sg"
+# Security Group to support Ray clustering
+resource "aws_security_group" "ray_cluster" {
+  name   = "${var.environment}-ray-cluster-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
-    from_port   = var.prefect_port
-    to_port     = var.prefect_port
+    from_port   = var.ray_port
+    to_port     = var.ray_port
     protocol    = "tcp"
     cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   tags = {
-    Name = "${var.environment}-prefect-cluster-sg"
+    Name = "${var.environment}-ray-cluster-sg"
   }
 }
 
@@ -115,20 +115,20 @@ resource "aws_security_group" "in_ssh" {
   }
 }
 
-# Security Group to support Prefect API access
-resource "aws_security_group" "in_prefect" {
-  name   = "${var.environment}-in-prefect-sg"
+# Security Group to support Ray API access
+resource "aws_security_group" "in_ray" {
+  name   = "${var.environment}-in-ray-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
-    from_port   = var.prefect_port
-    to_port     = var.prefect_port
+    from_port   = var.ray_port
+    to_port     = var.ray_port
     protocol    = "tcp"
     cidr_blocks = var.allowed_client_cidr
   }
 
   tags = {
-    Name = "${var.environment}-in-prefect-sg"
+    Name = "${var.environment}-in-ray-sg"
   }
 }
 
@@ -138,37 +138,37 @@ resource "aws_key_pair" "user" {
   public_key = file(pathexpand(var.ssh_public_key_path))
 }
 
-# Prefect primary interface
-resource "aws_network_interface" "prefect_server" {
+# Ray primary interface
+resource "aws_network_interface" "ray_server" {
   subnet_id = aws_subnet.pub[0].id
   security_groups = [
     aws_security_group.out_all.id,
     aws_security_group.in_ssh.id,
-    aws_security_group.prefect_cluster.id,
-    aws_security_group.in_prefect.id,
+    aws_security_group.ray_cluster.id,
+    aws_security_group.in_ray.id,
   ]
   tags = {
-    Name = "${var.environment}-prefect-server-eni"
+    Name = "${var.environment}-ray-server-eni"
   }
 }
 
-# Prefect server
-resource "aws_instance" "prefect_server" {
+# Ray server
+resource "aws_instance" "ray_server" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.server_instance_type
 
   key_name = aws_key_pair.user.key_name
 
   primary_network_interface {
-    network_interface_id = aws_network_interface.prefect_server.id
+    network_interface_id = aws_network_interface.ray_server.id
   }
 
   user_data_base64 = base64encode(templatefile("${path.module}/user_data_server.sh.tftpl", {
-    prefect_port = var.prefect_port
+    ray_port = var.ray_port
   }))
 
   tags = {
-    Name = "${var.environment}-prefect-server"
+    Name = "${var.environment}-ray-server"
   }
 }
 
@@ -217,8 +217,8 @@ resource "aws_iam_instance_profile" "fleet_profile" {
 }
 
 # EC2 Launch Template
-resource "aws_launch_template" "prefect_worker" {
-  name_prefix = "${var.environment}-prefect-worker-"
+resource "aws_launch_template" "ray_worker" {
+  name_prefix = "${var.environment}-ray-worker-"
   image_id    = data.aws_ami.ubuntu.id
 
   key_name = aws_key_pair.user.key_name
@@ -237,20 +237,20 @@ resource "aws_launch_template" "prefect_worker" {
     security_groups = [
       aws_security_group.out_all.id,
       aws_security_group.in_ssh.id,
-      aws_security_group.prefect_cluster.id,
+      aws_security_group.ray_cluster.id,
     ]
     delete_on_termination = true
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_worker.sh.tftpl", {
-    prefect_api_url = aws_instance.prefect_server.public_ip,
-    prefect_port    = var.prefect_port
+    ray_api_url = aws_instance.ray_server.public_ip,
+    ray_port    = var.ray_port
   }))
 
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "${var.environment}-prefect-worker"
+      Name = "${var.environment}-ray-worker"
     }
   }
 
@@ -276,7 +276,7 @@ resource "aws_autoscaling_group" "bar" {
     }
     launch_template {
       launch_template_specification {
-        launch_template_id = aws_launch_template.prefect_worker.id
+        launch_template_id = aws_launch_template.ray_worker.id
         version            = "$Latest"
       }
     }

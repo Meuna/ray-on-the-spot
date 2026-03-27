@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "environment" {
   description = "Environment name"
   type        = string
-  default     = "prefect-on-the-spot"
+  default     = "ray-on-the-spot"
 }
 
 variable "ssh_public_key_path" {
@@ -16,8 +16,8 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_rsa.pub"
 }
 
-variable "prefect_port" {
-  description = "Port for Prefect API"
+variable "ray_port" {
+  description = "Port for Ray API"
   type        = number
   default     = 4200
 }

@@ -1,6 +1,6 @@
-# prefect-on-the-spot
+# ray-on-the-spot
 
-This project provision a Prefect server and a Spot EC2 Scalling Group, using
+This project provision a Ray server and a Spot EC2 Scalling Group, using
 [OpenTofu](https://opentofu.org/docs/intro/install/).
 
 The Scalling Group has no scale-in/out strategy: the desired capacity will
@@ -24,8 +24,8 @@ $ ssh-keygen -t rsa
 2. Clone the repository
 
 ```console
-$ git https://github.com/Meuna/prefect-on-the-spot.git
-$ cd prefect-on-the-spot
+$ git https://github.com/Meuna/ray-on-the-spot.git
+$ cd ray-on-the-spot
 ```
 
 3. Initialise tofu

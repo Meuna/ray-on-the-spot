@@ -1,9 +1,9 @@
-output "prefect_api_url" {
-  description = "Prefect API url"
-  value       = "http://${aws_instance.prefect_server.public_ip}:${var.prefect_port}/api"
+output "ray_api_url" {
+  description = "Ray API url"
+  value       = "http://${aws_instance.ray_server.public_ip}:${var.ray_port}/api"
 }
 
-output "prefect_dashboard_url" {
-  description = "Prefect dashboard url"
-  value       = "http://${aws_instance.prefect_server.public_ip}:${var.prefect_port}"
+output "ray_dashboard_url" {
+  description = "Ray dashboard url"
+  value       = "http://${aws_instance.ray_server.public_ip}:${var.ray_port}"
 }
