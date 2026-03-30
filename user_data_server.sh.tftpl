@@ -20,4 +20,10 @@ cat > /root/.ray/config.json <<EOF
 }
 EOF
 
-uv run ray start --head --port=${ray_cluster_port} --dashboard-port=${ray_api_port} --dashboard-host 0.0.0.0 --num-cpus 0
+uv run ray start \
+  --head \
+  --port=${ray_cluster_port} \
+  --dashboard-port=${ray_api_port} \
+  --ray-client-server-port=${ray_client_port} \
+  --dashboard-host 0.0.0.0 \
+  --num-cpus 0

@@ -82,19 +82,46 @@ resource "aws_security_group" "out_all" {
 }
 
 # Security Group to support Ray clustering
+# The documentation refer to random ports, so we set it to 1025-65535
 resource "aws_security_group" "ray_cluster" {
   name   = "${var.environment}-ray-cluster-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
     from_port   = 1025
-    to_port     = 60000
+    to_port     = 65535
     protocol    = "tcp"
     cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   tags = {
     Name = "${var.environment}-ray-cluster-sg"
+  }
+}
+
+# Security Group to support Ray API access
+#   - ray_api_port (default to 8265): dashboard and API access
+#   - ray_client_port (default to 10001): client mode access
+resource "aws_security_group" "in_ray" {
+  name   = "${var.environment}-in-ray-sg"
+  vpc_id = aws_vpc.main.id
+
+  ingress {
+    from_port   = var.ray_api_port
+    to_port     = var.ray_api_port
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_client_cidr
+  }
+
+  ingress {
+    from_port   = var.ray_client_port
+    to_port     = var.ray_client_port
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_client_cidr
+  }
+
+  tags = {
+    Name = "${var.environment}-in-ray-sg"
   }
 }
 
@@ -115,23 +142,6 @@ resource "aws_security_group" "in_ssh" {
   }
 }
 
-# Security Group to support Ray API access
-resource "aws_security_group" "in_ray_api" {
-  name   = "${var.environment}-in-ray-api-sg"
-  vpc_id = aws_vpc.main.id
-
-  ingress {
-    from_port   = var.ray_api_port
-    to_port     = var.ray_api_port
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_client_cidr
-  }
-
-  tags = {
-    Name = "${var.environment}-in-ray-api-sg"
-  }
-}
-
 # Key Pair for SSH access
 resource "aws_key_pair" "user" {
   key_name   = "${var.environment}-ssh-key"
@@ -145,7 +155,7 @@ resource "aws_network_interface" "ray_server" {
     aws_security_group.out_all.id,
     aws_security_group.in_ssh.id,
     aws_security_group.ray_cluster.id,
-    aws_security_group.in_ray_api.id,
+    aws_security_group.in_ray.id,
   ]
   tags = {
     Name = "${var.environment}-ray-server-eni"
@@ -166,6 +176,7 @@ resource "aws_instance" "ray_server" {
   user_data_base64 = base64encode(templatefile("${path.module}/user_data_server.sh.tftpl", {
     ray_cluster_port = var.ray_cluster_port
     ray_api_port     = var.ray_api_port
+    ray_client_port  = var.ray_client_port
   }))
 
   tags = {

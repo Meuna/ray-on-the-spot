@@ -28,6 +28,12 @@ variable "ray_api_port" {
   default     = 8265
 }
 
+variable "ray_client_port" {
+  description = "Port for Ray client"
+  type        = number
+  default     = 10001
+}
+
 variable "server_instance_type" {
   description = "Instance type for the server"
   type        = string
