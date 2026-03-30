@@ -9,7 +9,7 @@ source /root/.local/bin/env
 uv python install 3.12
 uv python pin 3.12
 uv venv
-uv pip install ray[default]
+uv pip install pip ray[default]
 
 # Wait for Ray server to be healthy before configuring the main pool
 timeout 60 bash -c "until curl -sf http://${ray_api_url}:${ray_api_port} >/dev/null; do sleep 5; done"
