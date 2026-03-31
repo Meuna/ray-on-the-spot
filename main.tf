@@ -297,14 +297,18 @@ resource "aws_autoscaling_group" "ray_fleet" {
   health_check_type   = "EC2"
 
   desired_capacity_type = "vcpu"
-  min_size              = 1
-  max_size              = var.target_capacity
+  min_size              = var.target_capacity
+  max_size              = floor(var.target_capacity * 1.3)
   desired_capacity      = var.target_capacity
+
+  capacity_rebalance = true
+
+  wait_for_capacity_timeout = 0
 
   mixed_instances_policy {
     instances_distribution {
       on_demand_percentage_above_base_capacity = 0
-      spot_allocation_strategy                 = "lowest-price"
+      spot_allocation_strategy                 = "price-capacity-optimized"
     }
     launch_template {
       launch_template_specification {
