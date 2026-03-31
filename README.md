@@ -40,4 +40,51 @@ $ tofu init
 
 ```console
 $ tofu apply
+var.target_capacity
+  Total number of vCPUs requested
+
+  Enter a value: 16
+
+...
+
+Apply complete! Resources: 22 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ray_api_url = "http://<ip of the ray head node>:8265"
+```
+
+## Quickstart with ray
+
+The modern and easiest way to run a Python tool is using [uv](https://docs.astral.sh/uv/).
+
+Wait for the Ray head node to be online and then run the sample drivers:
+
+```console
+$ cd example
+$ export RAY_API_SERVER_ADDRESS="http://<ip of the ray head node>:8265"
+$ uv run --with ray[default] ray job submit --working-dir . -- python 01_driver_mc_pi.py
+```
+
+This command package the current `example` directory and send it to the head node.
+The driver script is then run remotely. Using the `--no-wait` flag, the command
+returns immediatly. You can monitor the job's progress using `ray job` subcommands
+or the ray dashboard at `http://<ip of the ray head node>:8265`.
+
+Alternatively, you can run the driver script on your local machine. Read the comments
+carefully and adapt the `ray.init` part accordingly.. Then run the driver as a
+standard python script.
+
+```console
+$ uv run --with ray[client] python 01_driver_mc_pi.py
+```
+
+This requires your machine to maintain a stable connection with the Ray cluster for
+the duration of the job.
+
+To run the second example, the head node need Python dependencies. You inject them
+using the `--runtime-env-json` flag:
+
+```console
+$ uv run --with ray[default] ray job submit --runtime-env-json '{"uv": ["numpy", "scipy"]}' --working-dir . -- python 02_driver_btc.py
 ```
