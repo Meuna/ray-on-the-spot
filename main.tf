@@ -11,6 +11,16 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Retrieve caller infos
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
+# Define locals to fix circles dependencies
+locals {
+  asg_name = "${var.environment}-autoscaling-group"
+  lifecycle_hook_name        = "${var.environment}-drain-hook"
+}
+
 # VPC
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -213,10 +223,15 @@ resource "aws_iam_role_policy" "ec2_fleet" {
       {
         Effect = "Allow"
         Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
+          "autoscaling:CompleteLifecycleAction"
         ]
-        Resource = "*"
+        Resource : provider::aws::arn_build(
+          data.aws_partition.current.partition,
+          "autoscaling",
+          var.aws_region,
+          data.aws_caller_identity.current.account_id,
+          "autoScalingGroupName/${local.asg_name}"
+        )
       }
     ]
   })
@@ -255,9 +270,12 @@ resource "aws_launch_template" "ray_worker" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_worker.sh.tftpl", {
-    ray_api_url      = aws_instance.ray_server.private_ip,
-    ray_cluster_port = var.ray_cluster_port
-    ray_api_port     = var.ray_api_port
+    ray_api_url         = aws_instance.ray_server.private_ip,
+    ray_cluster_port    = var.ray_cluster_port
+    ray_api_port        = var.ray_api_port
+    asg_name            = local.asg_name
+    lifecycle_hook_name = local.lifecycle_hook_name
+    aws_region          = var.aws_region
   }))
 
   tag_specifications {
@@ -273,10 +291,11 @@ resource "aws_launch_template" "ray_worker" {
 }
 
 # EC2 Auto Scaling Group
-resource "aws_autoscaling_group" "bar" {
-  name                  = "${var.environment}-autoscaling-group"
-  vpc_zone_identifier   = aws_subnet.pub[*].id
-  health_check_type     = "EC2"
+resource "aws_autoscaling_group" "ray_fleet" {
+  name                = local.asg_name
+  vpc_zone_identifier = aws_subnet.pub[*].id
+  health_check_type   = "EC2"
+
   desired_capacity_type = "vcpu"
   min_size              = 1
   max_size              = var.target_capacity
@@ -300,6 +319,15 @@ resource "aws_autoscaling_group" "bar" {
     value               = "${var.environment}-spot-fleet"
     propagate_at_launch = true
   }
+}
+
+# Lifecycle hook to drain Ray workers before termination
+resource "aws_autoscaling_lifecycle_hook" "ray_drain" {
+  name                   = local.lifecycle_hook_name
+  autoscaling_group_name = aws_autoscaling_group.ray_fleet.name
+  default_result         = "CONTINUE"
+  heartbeat_timeout      = 60
+  lifecycle_transition   = "autoscaling:EC2_INSTANCE_TERMINATING"
 }
 
 # Data sources

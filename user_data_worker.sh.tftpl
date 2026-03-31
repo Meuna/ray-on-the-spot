@@ -3,6 +3,8 @@ set -e
 
 cd /root
 
+snap install aws-cli --classic
+
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source /root/.local/bin/env
 
@@ -15,3 +17,79 @@ uv pip install pip ray[default]
 timeout 60 bash -c "until curl -sf http://${ray_api_url}:${ray_api_port} >/dev/null; do sleep 5; done"
 
 uv run ray start --address="${ray_api_url}:${ray_cluster_port}"
+
+# Create systemd services to watch for spot instance termination and shutdown Ray gracefully
+cat > /etc/systemd/system/on-spot-interrupt-shutdown-ray.service << 'EOF'
+[Unit]
+Description=Spot termination watcher
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root
+Environment=METADATA_V2_API=http://169.254.169.254/latest
+ExecStart=/bin/bash -c ' \
+    TOKEN=$(curl -fs -X PUT $METADATA_V2_API/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 5") \
+    && curl -fs -H "X-aws-ec2-metadata-token: $TOKEN" $METADATA_V2_API/meta-data/spot/instance-action >/dev/null \
+    && /root/.local/bin/uv run ray stop -g 60 \
+    || true'
+EOF
+
+cat > /etc/systemd/system/on-spot-interrupt-shutdown-ray.timer << 'EOF'
+[Unit]
+Description=Run spot watcher every 10s
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=on-spot-interrupt-shutdown-ray.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Create systemd services to watch for ASG lifecycle and shutdown Ray gracefully
+cat > /etc/systemd/system/on-asg-termination-shutdown-ray.service << 'EOF'
+[Unit]
+Description=ASG termination watcher
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root
+Environment=METADATA_V2_API=http://169.254.169.254/latest
+ExecStart=/bin/bash -c ' \
+    TOKEN=$(curl -fs -X PUT $METADATA_V2_API/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 5") \
+    && TARGET_STATE=$(curl -fs -H "X-aws-ec2-metadata-token: $TOKEN" $METADATA_V2_API/meta-data/autoscaling/target-lifecycle-state) \
+    && [ "$TARGET_STATE" = "Terminated" ] \
+    && INSTANCE_ID=$(curl -fs -H "X-aws-ec2-metadata-token: $TOKEN" $METADATA_V2_API/meta-data/instance-id) \
+    && /root/.local/bin/uv run ray stop -g 60 \
+    && aws autoscaling complete-lifecycle-action \
+        --auto-scaling-group-name ${asg_name} \
+        --lifecycle-hook-name ${lifecycle_hook_name} \
+        --lifecycle-action-result CONTINUE \
+        --instance-id $INSTANCE_ID \
+        --region ${aws_region} \
+    || true'
+EOF
+
+cat > /etc/systemd/system/on-asg-termination-shutdown-ray.timer << 'EOF'
+[Unit]
+Description=Run ASG termination watcher every 10s
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=on-asg-termination-shutdown-ray.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+
+systemctl enable on-spot-interrupt-shutdown-ray.timer
+systemctl start on-spot-interrupt-shutdown-ray.timer
+
+systemctl enable on-asg-termination-shutdown-ray.timer
+systemctl start on-asg-termination-shutdown-ray.timer
