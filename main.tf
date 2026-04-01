@@ -15,12 +15,6 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
-# Define locals to fix circles dependencies
-locals {
-  asg_name = "${var.environment}-autoscaling-group"
-  lifecycle_hook_name        = "${var.environment}-drain-hook"
-}
-
 # VPC
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -194,55 +188,6 @@ resource "aws_instance" "ray_server" {
   }
 }
 
-# IAM Role for EC2 instances
-resource "aws_iam_role" "ec2_fleet" {
-  name = "${var.environment}-ec2-fleet-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# IAM Policy for EC2 instances
-resource "aws_iam_role_policy" "ec2_fleet" {
-  name = "${var.environment}-ec2-fleet-policy"
-  role = aws_iam_role.ec2_fleet.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "autoscaling:CompleteLifecycleAction"
-        ]
-        Resource : provider::aws::arn_build(
-          data.aws_partition.current.partition,
-          "autoscaling",
-          var.aws_region,
-          data.aws_caller_identity.current.account_id,
-          "autoScalingGroupName/${local.asg_name}"
-        )
-      }
-    ]
-  })
-}
-
-# IAM Instance Profile
-resource "aws_iam_instance_profile" "fleet_profile" {
-  name = "${var.environment}-fleet-profile"
-  role = aws_iam_role.ec2_fleet.name
-}
-
 # EC2 Launch Template
 resource "aws_launch_template" "ray_worker" {
   name_prefix = "${var.environment}-ray-worker-"
@@ -253,11 +198,9 @@ resource "aws_launch_template" "ray_worker" {
   instance_requirements {
     memory_mib { min = 1 }
     vcpu_count { min = var.worker_fleet_min_cpu }
-    max_spot_price_as_percentage_of_optimal_on_demand_price = var.spot_price_ratio
-  }
 
-  iam_instance_profile {
-    name = aws_iam_instance_profile.fleet_profile.name
+    # Probably does not work with EC2 fleet, but we keep it in case we switch back to ASG
+    max_spot_price_as_percentage_of_optimal_on_demand_price = var.spot_price_ratio
   }
 
   network_interfaces {
@@ -270,12 +213,9 @@ resource "aws_launch_template" "ray_worker" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_worker.sh.tftpl", {
-    ray_api_url         = aws_instance.ray_server.private_ip,
-    ray_cluster_port    = var.ray_cluster_port
-    ray_api_port        = var.ray_api_port
-    asg_name            = local.asg_name
-    lifecycle_hook_name = local.lifecycle_hook_name
-    aws_region          = var.aws_region
+    ray_api_url      = aws_instance.ray_server.private_ip,
+    ray_cluster_port = var.ray_cluster_port
+    ray_api_port     = var.ray_api_port
   }))
 
   tag_specifications {
@@ -290,48 +230,34 @@ resource "aws_launch_template" "ray_worker" {
   }
 }
 
-# EC2 Auto Scaling Group
-resource "aws_autoscaling_group" "ray_fleet" {
-  name                = local.asg_name
-  vpc_zone_identifier = aws_subnet.pub[*].id
-  health_check_type   = "EC2"
+# EC2 fleet
+resource "aws_ec2_fleet" "ray_fleet" {
+  excess_capacity_termination_policy  = "termination"
+  replace_unhealthy_instances         = true
+  terminate_instances_with_expiration = true
+  terminate_instances                 = true
 
-  desired_capacity_type = "vcpu"
-  min_size              = var.target_capacity
-  max_size              = floor(var.target_capacity * 1.3)
-  desired_capacity      = var.target_capacity
-
-  capacity_rebalance = true
-
-  wait_for_capacity_timeout = 0
-
-  mixed_instances_policy {
-    instances_distribution {
-      on_demand_percentage_above_base_capacity = 0
-      spot_allocation_strategy                 = "price-capacity-optimized"
-    }
-    launch_template {
-      launch_template_specification {
-        launch_template_id = aws_launch_template.ray_worker.id
-        version            = "$Latest"
-      }
-    }
+  target_capacity_specification {
+    default_target_capacity_type = "spot"
+    total_target_capacity        = var.target_capacity
+    spot_target_capacity         = var.target_capacity
+    on_demand_target_capacity    = 0
+    target_capacity_unit_type    = "vcpu"
   }
 
-  tag {
-    key                 = "Name"
-    value               = "${var.environment}-spot-fleet"
-    propagate_at_launch = true
+  spot_options {
+    allocation_strategy = "price-capacity-optimized"
   }
-}
 
-# Lifecycle hook to drain Ray workers before termination
-resource "aws_autoscaling_lifecycle_hook" "ray_drain" {
-  name                   = local.lifecycle_hook_name
-  autoscaling_group_name = aws_autoscaling_group.ray_fleet.name
-  default_result         = "CONTINUE"
-  heartbeat_timeout      = 60
-  lifecycle_transition   = "autoscaling:EC2_INSTANCE_TERMINATING"
+  launch_template_config {
+    launch_template_specification {
+      launch_template_id = aws_launch_template.ray_worker.id
+      version            = "$Latest"
+    }
+    override {
+      subnet_id = join(",", aws_subnet.pub[*].id)
+    }
+  }
 }
 
 # Data sources
