@@ -37,7 +37,7 @@ variable "ray_client_port" {
 variable "server_instance_type" {
   description = "Instance type for the server"
   type        = string
-  default     = "t3.medium"
+  default     = "c6i.xlarge"
 }
 
 variable "worker_fleet_min_cpu" {
